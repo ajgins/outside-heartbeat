@@ -1,21 +1,40 @@
 name: heartbeat
+# GitHub never queued this repo's cron (0 scheduled runs in 92 min on 11-08; 0 of our 249 repos ever had one), so the
+# timer is a chain: each chained run waits 10 min on the `tick` environment's wait timer (no runner held while waiting),
+# runs the check, then starts the next run with workflow_dispatch (the one event GITHUB_TOKEN may start). The cron stays
+# in case GitHub ever runs it; `concurrency` keeps at most one running + one pending run, so chains merge. If the chain
+# breaks, the Mini's com.blrb.outside-beat restarts it whenever the Mini is up.
 on:
   schedule:
-    - cron: "3,13,23,33,43,53 * * * *"   # every 10 min, off the :00/:10 boundaries GitHub delays or drops under load
+    - cron: "3,13,23,33,43,53 * * * *"
   workflow_dispatch:
     inputs:
       drill:
         description: "none, or both-down to open a [drill] issue (nobody assigned)"
         required: false
         default: "none"
+      chain:
+        description: "yes = wait 10 min on the tick timer first (set by the chain itself)"
+        required: false
+        default: "no"
 permissions:
   contents: read
   issues: write
+  actions: write
 concurrency:
   group: heartbeat
   cancel-in-progress: false
 jobs:
+  tick:
+    if: ${{ inputs.chain == 'yes' }}
+    runs-on: ubuntu-latest
+    environment: tick
+    timeout-minutes: 2
+    steps:
+      - run: echo "tick"
   check:
+    needs: tick
+    if: ${{ always() && needs.tick.result != 'failure' && needs.tick.result != 'cancelled' }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -27,3 +46,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           MINI_BEAT: ${{ vars.MINI_BEAT }}
           DRILL: ${{ inputs.drill || 'none' }}
+  next:
+    needs: check
+    if: ${{ always() && needs.check.result != 'cancelled' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Start the next run (waits 10 min on the tick timer)
+        run: gh workflow run heartbeat.yml -R "$REPO" -f chain=yes -f drill=none
+        env:
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
