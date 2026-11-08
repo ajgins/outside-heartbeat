@@ -3,7 +3,9 @@
 A watcher that lives outside both of our machines. GitHub never queued this repo's cron (0 scheduled runs in 92 min
 on 2026-11-08), so the timer is a **self-renewing chain**: each run waits 10 minutes on the `tick` environment's wait
 timer (no runner held), runs the check, then starts the next run with `workflow_dispatch`. `concurrency` keeps one
-running plus one pending, so chains merge. If the chain ever breaks, the Mini's `com.blrb.outside-beat` restarts it
+running plus one pending per lane, so chains merge. There are **two lanes** (a, b), and each run restarts the other lane
+when nothing of it is in flight, so one broken chain heals within a tick on GitHub alone (tested 2026-11-08: lane b
+cancelled at 09:01:35, restarted by lane a at 09:11:27). If both ever break, the Mini's `com.blrb.outside-beat` restarts it
 whenever the Mini is up (nothing in flight and the newest run older than 25 min). Each check, on a GitHub-hosted runner:
 
 1. probes the VPS sites in `targets.txt` (any answer under 500 means the VPS is up; it retries once after 90 s),
