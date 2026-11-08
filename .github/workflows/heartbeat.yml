@@ -1,7 +1,7 @@
 name: heartbeat
 on:
   schedule:
-    - cron: "7,17,27,37,47,57 * * * *"   # every 10 min, off the :00/:10 boundaries GitHub delays or drops under load
+    - cron: "3,13,23,33,43,53 * * * *"   # every 10 min, off the :00/:10 boundaries GitHub delays or drops under load
   workflow_dispatch:
     inputs:
       drill:
