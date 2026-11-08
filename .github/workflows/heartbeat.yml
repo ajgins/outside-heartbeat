@@ -1,0 +1,29 @@
+name: heartbeat
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      drill:
+        description: "none, or both-down to open a [drill] issue (nobody assigned)"
+        required: false
+        default: "none"
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: heartbeat
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe the VPS, read the Mini's beat, open/close the both-down issue
+        run: ./check.sh
+        env:
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          MINI_BEAT: ${{ vars.MINI_BEAT }}
+          DRILL: ${{ inputs.drill || 'none' }}

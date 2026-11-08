@@ -1,0 +1,4 @@
+# VPS sites probed from outside. Any answer under 500 = the VPS is up. Public sites only.
+https://crossoverlabs.ai/
+https://shortlist.watch/
+https://jairy-standby.crossoverlabs.ai/health
