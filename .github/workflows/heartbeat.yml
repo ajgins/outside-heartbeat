@@ -1,9 +1,12 @@
 name: heartbeat
+run-name: heartbeat ${{ inputs.lane || 'a' }}
 # GitHub never queued this repo's cron (0 scheduled runs in 92 min on 11-08; 0 of our 249 repos ever had one), so the
 # timer is a chain: each chained run waits 10 min on the `tick` environment's wait timer (no runner held while waiting),
 # runs the check, then starts the next run with workflow_dispatch (the one event GITHUB_TOKEN may start). The cron stays
 # in case GitHub ever runs it; `concurrency` keeps at most one running + one pending run, so chains merge. If the chain
 # breaks, the Mini's com.blrb.outside-beat restarts it whenever the Mini is up.
+# Two lanes (a, b), each its own chain and concurrency group: every run restarts the OTHER lane when it has no run in
+# flight, so one broken chain heals within a tick even while both of our machines are down.
 on:
   schedule:
     - cron: "3,13,23,33,43,53 * * * *"
@@ -17,12 +20,16 @@ on:
         description: "yes = wait 10 min on the tick timer first (set by the chain itself)"
         required: false
         default: "no"
+      lane:
+        description: "a or b (two chains that restart each other)"
+        required: false
+        default: "a"
 permissions:
   contents: read
   issues: write
   actions: write
 concurrency:
-  group: heartbeat
+  group: heartbeat-${{ inputs.lane || 'a' }}
   cancel-in-progress: false
 jobs:
   tick:
@@ -52,8 +59,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Start the next run (waits 10 min on the tick timer)
-        run: gh workflow run heartbeat.yml -R "$REPO" -f chain=yes -f drill=none
+      - name: Start this lane's next run (waits 10 min on the tick timer)
+        run: gh workflow run heartbeat.yml -R "$REPO" -f chain=yes -f drill=none -f lane="$LANE"
         env:
           REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
+          LANE: ${{ inputs.lane || 'a' }}
+      - name: Restart the other lane if it has no run in flight
+        run: |
+          other=$([ "$LANE" = a ] && echo b || echo a)
+          n=$(gh run list -R "$REPO" --workflow heartbeat.yml -L 40 --json displayTitle,status \
+                -q "[.[] | select(.displayTitle == \"heartbeat $other\") | select(.status != \"completed\")] | length")
+          if [ "${n:-0}" = 0 ]; then
+            gh workflow run heartbeat.yml -R "$REPO" -f chain=yes -f drill=none -f lane="$other"
+            echo "lane $other had no run in flight: restarted it"
+          else
+            echo "lane $other in flight ($n)"
+          fi
+        env:
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          LANE: ${{ inputs.lane || 'a' }}
