@@ -1,0 +1,67 @@
+name: claude-settings-guard
+# Fails when .claude/settings.local.json is tracked or not gitignored, or a Claude settings file holds a live
+# secret. Runs when Claude settings or .gitignore change, or by hand (Run workflow; optional ref = a branch, tag or
+# commit to check with this guard, plus its commits not on the default branch). Source: crossover-labs/security-check
+# tools/claude-settings-guard.py (copy at .github/claude-settings-guard.py).
+# Plain git fetch, not actions/checkout: checkout's auth cleanup runs `git submodule foreach`, which exits 128 on a
+# gitlink with no .gitmodules entry (ajgins/shortlist-ios 'web', run 42388250186) before the guard can run. The token
+# lives only in this step's environment (GIT_CONFIG_*), never in .git/config.
+on:
+  push:
+    paths: ['.claude/**', '**/.claude/**', '.mcp.json', '**/.mcp.json', '.gitignore', '**/.gitignore',
+            '.github/claude-settings-guard.py', '.github/workflows/claude-settings-guard.yml']
+  pull_request:
+    paths: ['.claude/**', '**/.claude/**', '.mcp.json', '**/.mcp.json', '.gitignore', '**/.gitignore',
+            '.github/claude-settings-guard.py', '.github/workflows/claude-settings-guard.yml']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag or commit to check (empty: the commit this runs on)'
+        required: false
+        default: ''
+permissions:
+  contents: read
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch (plain git, no submodule handling)
+        env:
+          TOKEN: ${{ github.token }}
+          INPUT_REF: ${{ github.event.inputs.ref }}
+        run: |
+          set -eu
+          H=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          echo "::add-mask::$H"
+          export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0="http.$GITHUB_SERVER_URL/.extraheader" GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $H"
+          F="git fetch -q --no-tags --no-recurse-submodules origin"
+          git init -q .
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          $F '+refs/heads/*:refs/remotes/origin/*'
+          case "$GITHUB_REF" in refs/pull/*) $F "+$GITHUB_REF:$GITHUB_REF" ;; esac
+          git cat-file -e "$GITHUB_SHA^{commit}" 2>/dev/null || $F "$GITHUB_SHA"
+          T="$GITHUB_SHA"
+          if [ -n "$INPUT_REF" ]; then
+            T=$(git rev-parse -q --verify "origin/$INPUT_REF^{commit}" || git rev-parse -q --verify "$INPUT_REF^{commit}" || { $F "$INPUT_REF" && git rev-parse FETCH_HEAD; })
+          fi
+          git show "$GITHUB_SHA:.github/claude-settings-guard.py" > "$RUNNER_TEMP/claude-settings-guard.py"
+          git -c advice.detachedHead=false checkout -q --detach "$T"
+          echo "TARGET=$T" >> "$GITHUB_ENV"
+          echo "checked out $T"
+      - name: Claude settings guard
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          INPUT_REF: ${{ github.event.inputs.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          R=""
+          if [ -n "$BASE" ]; then R="$BASE..$HEAD_SHA"
+          elif [ -n "$INPUT_REF" ]; then
+            MB=$(git merge-base "origin/$DEFAULT_BRANCH" "$TARGET" 2>/dev/null || true)
+            if [ -n "$MB" ] && [ "$MB" != "$TARGET" ]; then R="$MB..$TARGET"; fi
+          elif [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then R="$BEFORE..$AFTER"; fi
+          python3 "$RUNNER_TEMP/claude-settings-guard.py" ci ${R:+--range "$R"}
