@@ -4,7 +4,7 @@ A watcher that lives outside both of our machines. Every 10 minutes a GitHub-hos
 
 1. probes the VPS sites in `targets.txt` (any answer under 500 means the VPS is up; it retries once after 90 s),
 2. reads `MINI_BEAT`, a repository variable the Mac Mini sets every 10 minutes (LaunchAgent `com.blrb.outside-beat`,
-   source `yopick hub/heartbeat/outside-beat.mjs`), plus jairy-standby's public `/health` (the Mini as the VPS sees it),
+   source `yopick hub/heartbeat/outside-beat.mjs`; it alerts through the hub itself if its writes keep failing),
 3. when the VPS is down and the Mini's beat is over 30 minutes old, opens ONE issue labelled `both-down`, assigned to
    @ajgins (GitHub email and push), and fails that run. Later runs stay quiet while it is open. When either host
    answers again, the issue gets a recovery comment and closes.

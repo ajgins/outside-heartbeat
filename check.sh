@@ -20,18 +20,13 @@ vps_up() {
   done < "$TARGETS"
   return 1
 }
-standby_says_mini() {  # true | false | "" (VPS unreachable); jairy-standby is the Mini seen from the VPS
-  curl -sS -m 10 "${STANDBY_URL:-https://jairy-standby.crossoverlabs.ai/health}" 2>/dev/null | jq -r '.mini.up // empty' 2>/dev/null || true
-}
 
 if vps_up; then vps=up; else sleep "$RETRY_SECS"; if vps_up; then vps=up; else vps=down; fi; fi
 if [[ "${MINI_BEAT:-}" =~ ^[0-9]+$ ]] && [ $((NOW - MINI_BEAT)) -le "$STALE" ]; then beat=fresh; else beat=stale; fi
-sv=$(standby_says_mini)
-mini=up
-if [ "$beat" = stale ] && [ "$sv" != true ]; then mini=down; fi
+mini=up; [ "$beat" = stale ] && mini=down   # a broken beat writer is caught on the Mini (outside-beat alerts after 3 failed writes)
 both=0; [ "$vps" = down ] && [ "$mini" = down ] && both=1
 drill=0; [ "$DRILL" = both-down ] && { both=1; drill=1; }
-echo "vps=$vps mini_beat=$beat standby_sees_mini=${sv:-unreachable} both_down=$both drill=$drill"
+echo "vps=$vps mini_beat=$beat both_down=$both drill=$drill"
 
 gh label create "$LABEL" -R "$REPO" --color B60205 --description "Mini and VPS both unreachable from outside" >/dev/null 2>&1 || true
 open=$(gh issue list -R "$REPO" --label "$LABEL" --state open --json number,title,createdAt \
@@ -47,7 +42,7 @@ if [ "$both" = 1 ]; then
   fi
   gh issue create -R "$REPO" --label "$LABEL" --assignee "$ASSIGNEE" \
     --title "Both hosts unreachable from outside (VPS + Mac Mini)" \
-    --body "@$ASSIGNEE outside heartbeat at $stamp: every VPS probe failed twice, ${RETRY_SECS}s apart, and the Mac Mini's heartbeat is over $((STALE / 60)) min old (jairy-standby unreachable).
+    --body "@$ASSIGNEE outside heartbeat at $stamp: every VPS probe failed twice, ${RETRY_SECS}s apart, and the Mac Mini's heartbeat is over $((STALE / 60)) min old.
 
 Nothing inside us can alert while both are down. Rebuild runbook: agent-review repo, vps-rebuild-runbook.md. This issue closes itself when either host answers." >/dev/null
   echo "ALERT issue opened"; exit 1   # a failed run also sends GitHub's run-failed email
