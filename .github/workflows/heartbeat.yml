@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Probe the VPS, read the Mini's beat, open/close the both-down issue
         run: ./check.sh
         env:
